@@ -183,32 +183,42 @@ void setup(std::vector<std::string> args,
     };
 
     std::string model_name = std::filesystem::canonical(model_path).filename().string();
-    auto read_groups = DataLoader::load_read_groups(data_path, model_name, recursive_file_loading);
 
+    bool dori_stdin = std::filesystem::path(data_path.c_str()).filename().string() == "-";
     auto read_list = utils::load_read_list(read_list_file_path);
 
-    // Check sample rate of model vs data.
-    auto data_sample_rate = DataLoader::get_sample_rate(data_path, recursive_file_loading);
-    auto model_sample_rate = get_model_sample_rate(model_path);
-    if (!skip_model_compatibility_check && (data_sample_rate != model_sample_rate)) {
-        std::stringstream err;
-        err << "Sample rate for model (" << model_sample_rate << ") and data (" << data_sample_rate
-            << ") don't match.";
-        throw std::runtime_error(err.str());
-    }
+    std::unique_ptr<sam_hdr_t, void (*)(sam_hdr_t*)> hdr(sam_hdr_init(), sam_hdr_destroy);
+    utils::add_pg_hdr(hdr.get(), args);
+    
+    size_t num_reads;
+    if (!dori_stdin) {
+        auto read_groups = DataLoader::load_read_groups(data_path, model_name, recursive_file_loading);
 
-    size_t num_reads = DataLoader::get_num_reads(
-            data_path, read_list, {} /*reads_already_processed*/, recursive_file_loading);
-    num_reads = max_reads == 0 ? num_reads : std::min(num_reads, max_reads);
+        utils::add_rg_hdr(hdr.get(), read_groups);
+
+        // Check sample rate of model vs data.
+        auto data_sample_rate = DataLoader::get_sample_rate(data_path, recursive_file_loading);
+        auto model_sample_rate = get_model_sample_rate(model_path);
+        if (!skip_model_compatibility_check && (data_sample_rate != model_sample_rate)) {
+            std::stringstream err;
+            err << "Sample rate for model (" << model_sample_rate << ") and data (" << data_sample_rate
+                << ") don't match.";
+            throw std::runtime_error(err.str());
+        }
+
+        size_t num_reads = DataLoader::get_num_reads(
+                data_path, read_list, {} /*reads_already_processed*/, recursive_file_loading);
+        num_reads = max_reads == 0 ? num_reads : std::min(num_reads, max_reads);
+    } else {
+        num_reads = 0;
+    }
+    
 
     bool rna = utils::is_rna_model(model_path), duplex = false;
 
     auto const thread_allocations = utils::default_thread_allocations(
             num_devices, !remora_model_list.empty() ? num_remora_threads : 0);
 
-    std::unique_ptr<sam_hdr_t, void (*)(sam_hdr_t*)> hdr(sam_hdr_init(), sam_hdr_destroy);
-    utils::add_pg_hdr(hdr.get(), args);
-    utils::add_rg_hdr(hdr.get(), read_groups);
     std::shared_ptr<HtsWriter> bam_writer;
     std::shared_ptr<Aligner> aligner;
     MessageSink* converted_reads_sink = nullptr;
@@ -274,46 +284,46 @@ void setup(std::vector<std::string> args,
                       reads_already_processed);
 
     // Setup stats counting
-    std::unique_ptr<dorado::stats::StatsSampler> stats_sampler;
-    std::vector<dorado::stats::StatsReporter> stats_reporters;
-    using dorado::stats::make_stats_reporter;
-    stats_reporters.push_back(make_stats_reporter(basecaller_node));
-    if (mod_base_caller_node) {
-        stats_reporters.push_back(make_stats_reporter(*mod_base_caller_node));
-    }
-    if (aligner) {
-        stats_reporters.push_back(make_stats_reporter(*aligner));
-    }
-    stats_reporters.push_back(make_stats_reporter(*bam_writer));
-    stats_reporters.push_back(make_stats_reporter(loader));
-    stats_reporters.push_back(make_stats_reporter(scaler_node));
-    stats_reporters.push_back(make_stats_reporter(read_filter_node));
+    // std::unique_ptr<dorado::stats::StatsSampler> stats_sampler;
+    // std::vector<dorado::stats::StatsReporter> stats_reporters;
+    // using dorado::stats::make_stats_reporter;
+    // stats_reporters.push_back(make_stats_reporter(basecaller_node));
+    // if (mod_base_caller_node) {
+    //     stats_reporters.push_back(make_stats_reporter(*mod_base_caller_node));
+    // }
+    // if (aligner) {
+    //     stats_reporters.push_back(make_stats_reporter(*aligner));
+    // }
+    // stats_reporters.push_back(make_stats_reporter(*bam_writer));
+    // stats_reporters.push_back(make_stats_reporter(loader));
+    // stats_reporters.push_back(make_stats_reporter(scaler_node));
+    // stats_reporters.push_back(make_stats_reporter(read_filter_node));
 
-    std::vector<dorado::stats::StatsCallable> stats_callables;
-    ProgressTracker tracker(num_reads, duplex);
-    stats_callables.push_back(
-            [&tracker](const stats::NamedStats& stats) { tracker.update_progress_bar(stats); });
+    // std::vector<dorado::stats::StatsCallable> stats_callables;
+    // ProgressTracker tracker(num_reads, duplex);
+    // stats_callables.push_back(
+    //         [&tracker](const stats::NamedStats& stats) { tracker.update_progress_bar(stats); });
 
-    constexpr auto kStatsPeriod = 100ms;
-    stats_sampler = std::make_unique<dorado::stats::StatsSampler>(kStatsPeriod, stats_reporters,
-                                                                  stats_callables);
+    // constexpr auto kStatsPeriod = 100ms;
+    // stats_sampler = std::make_unique<dorado::stats::StatsSampler>(kStatsPeriod, stats_reporters,
+    //                                                               stats_callables);
     // End stats counting setup.
 
     // Run pipeline.
-    loader.load_reads(data_path, recursive_file_loading);
+    loader.load_reads(data_path, recursive_file_loading, dori_stdin);
 
     bam_writer->join();
     // End pipeline
 
-    stats_sampler->terminate();
-    tracker.summarize();
-    if (!dump_stats_file.empty()) {
-        std::ofstream stats_file(dump_stats_file);
-        stats_sampler->dump_stats(stats_file,
-                                  dump_stats_filter.empty()
-                                          ? std::nullopt
-                                          : std::optional<std::regex>(dump_stats_filter));
-    }
+    // stats_sampler->terminate();
+    // tracker.summarize();
+    // if (!dump_stats_file.empty()) {
+    //     std::ofstream stats_file(dump_stats_file);
+    //     stats_sampler->dump_stats(stats_file,
+    //                               dump_stats_filter.empty()
+    //                                       ? std::nullopt
+    //                                       : std::optional<std::regex>(dump_stats_filter));
+    // }
 }
 
 int basecaller(int argc, char* argv[]) {

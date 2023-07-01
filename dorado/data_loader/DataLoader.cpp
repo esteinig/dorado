@@ -123,85 +123,92 @@ void Pod5Destructor::operator()(Pod5FileReader_t* pod5) { pod5_close_and_free_re
 
 void DataLoader::load_reads(const std::string& path,
                             bool recursive_file_loading,
+                            bool dori_stdin,
                             ReadOrder traversal_order) {
-    if (!std::filesystem::exists(path)) {
-        spdlog::error("Requested input path {} does not exist!", path);
-        m_read_sink.terminate();
-        return;
-    }
-    if (!std::filesystem::is_directory(path)) {
-        spdlog::error("Requested input path {} is not a directory!", path);
-        m_read_sink.terminate();
-        return;
-    }
+    
+    if (dori_stdin){
+        load_raw_reads_from_stdin();
+    } else {
+        if (!std::filesystem::exists(path)) {
+            spdlog::error("Requested input path {} does not exist!", path);
+            m_read_sink.terminate();
+            return;
+        }
+        if (!std::filesystem::is_directory(path)) {
+            spdlog::error("Requested input path {} is not a directory!", path);
+            m_read_sink.terminate();
+            return;
+        }
 
-    auto iterate_directory = [&](const auto& iterator_fn) {
-        switch (traversal_order) {
-        case BY_CHANNEL:
-            // If traversal in channel order is required, the following algorithm
-            // is used -
-            // 1. iterate through all the read metadata to collect channel information
-            // across all pod5 files
-            // 2. store the read list sorted by channel number
-            spdlog::info("> Reading read channel info");
-            load_read_channels(path, recursive_file_loading);
-            spdlog::info("> Processed read channel info");
-            // 3. for each channel, iterate through all files and in each iteration
-            // only load the reads that correspond to that channel.
-            for (int channel = 0; channel <= m_max_channel; channel++) {
+        auto iterate_directory = [&](const auto& iterator_fn) {
+            switch (traversal_order) {
+            case BY_CHANNEL:
+                // If traversal in channel order is required, the following algorithm
+                // is used -
+                // 1. iterate through all the read metadata to collect channel information
+                // across all pod5 files
+                // 2. store the read list sorted by channel number
+                spdlog::info("> Reading read channel info");
+                load_read_channels(path, recursive_file_loading);
+                spdlog::info("> Processed read channel info");
+                // 3. for each channel, iterate through all files and in each iteration
+                // only load the reads that correspond to that channel.
+                for (int channel = 0; channel <= m_max_channel; channel++) {
+                    for (const auto& entry : iterator_fn(path)) {
+                        if (m_loaded_read_count == m_max_reads) {
+                            break;
+                        }
+                        auto path = std::filesystem::path(entry);
+                        std::string ext = path.extension().string();
+                        std::transform(ext.begin(), ext.end(), ext.begin(),
+                                    [](unsigned char c) { return std::tolower(c); });
+                        if (ext == ".fast5") {
+                            throw std::runtime_error(
+                                    "Traversing reads by channel is only availabls for POD5. "
+                                    "Encountered FAST5 at " +
+                                    path.string());
+                        } else if (ext == ".pod5") {
+                            auto& channel_to_read_ids = m_file_channel_read_order_map.at(path.string());
+                            auto& read_ids = channel_to_read_ids[channel];
+                            if (!read_ids.empty()) {
+                                load_pod5_reads_from_file_by_read_ids(path.string(), read_ids);
+                            }
+                        }
+                    }
+                }
+                break;
+            case UNRESTRICTED:
                 for (const auto& entry : iterator_fn(path)) {
                     if (m_loaded_read_count == m_max_reads) {
                         break;
                     }
-                    auto path = std::filesystem::path(entry);
-                    std::string ext = path.extension().string();
+                    std::string ext = std::filesystem::path(entry).extension().string();
                     std::transform(ext.begin(), ext.end(), ext.begin(),
-                                   [](unsigned char c) { return std::tolower(c); });
+                                [](unsigned char c) { return std::tolower(c); });
                     if (ext == ".fast5") {
-                        throw std::runtime_error(
-                                "Traversing reads by channel is only availabls for POD5. "
-                                "Encountered FAST5 at " +
-                                path.string());
+                        load_fast5_reads_from_file(entry.path().string());
                     } else if (ext == ".pod5") {
-                        auto& channel_to_read_ids = m_file_channel_read_order_map.at(path.string());
-                        auto& read_ids = channel_to_read_ids[channel];
-                        if (!read_ids.empty()) {
-                            load_pod5_reads_from_file_by_read_ids(path.string(), read_ids);
-                        }
+                        load_pod5_reads_from_file(entry.path().string());
                     }
                 }
+                break;
+            default:
+                throw std::runtime_error("Unsupported traversal order detected " +
+                                        std::to_string(traversal_order));
             }
-            break;
-        case UNRESTRICTED:
-            for (const auto& entry : iterator_fn(path)) {
-                if (m_loaded_read_count == m_max_reads) {
-                    break;
-                }
-                std::string ext = std::filesystem::path(entry).extension().string();
-                std::transform(ext.begin(), ext.end(), ext.begin(),
-                               [](unsigned char c) { return std::tolower(c); });
-                if (ext == ".fast5") {
-                    load_fast5_reads_from_file(entry.path().string());
-                } else if (ext == ".pod5") {
-                    load_pod5_reads_from_file(entry.path().string());
-                }
-            }
-            break;
-        default:
-            throw std::runtime_error("Unsupported traversal order detected " +
-                                     std::to_string(traversal_order));
+        };
+
+        if (recursive_file_loading) {
+            iterate_directory([](const auto& path) {
+                return std::filesystem::recursive_directory_iterator(path);
+            });
+        } else {
+            iterate_directory(
+                    [](const auto& path) { return std::filesystem::directory_iterator(path); });
         }
-    };
-
-    if (recursive_file_loading) {
-        iterate_directory([](const auto& path) {
-            return std::filesystem::recursive_directory_iterator(path);
-        });
-    } else {
-        iterate_directory(
-                [](const auto& path) { return std::filesystem::directory_iterator(path); });
     }
-
+    
+    
     m_read_sink.terminate();
 }
 
@@ -765,6 +772,81 @@ void DataLoader::load_fast5_reads_from_file(const std::string& path) {
             m_read_sink.push_message(new_read);
             m_loaded_read_count++;
         }
+    }
+}
+
+
+void DataLoader::load_raw_reads_from_stdin(bool test) {
+    
+    std::string line;
+    std::string req_id;
+
+    std::int32_t req_channel;
+    std::int32_t req_number;
+
+    float req_digitisation;
+    float req_offset;
+    float req_range;
+
+    std::uint64_t req_sample_rate;
+
+    std::vector<int16_t> req_data;  // uncalibrated signal data from byte data out of minknow
+
+    while(std::getline( std::cin, line ) && !line.empty()){  
+
+        std::istringstream text_stream(line);
+        
+        text_stream >> req_id; 
+        text_stream >> req_channel;
+        text_stream >> req_number; 
+        text_stream >> req_digitisation; 
+        text_stream >> req_offset;
+        text_stream >> req_range;
+        text_stream >> req_sample_rate;
+
+        std::vector<std::int16_t> req_data( 
+            ( std::istream_iterator<std::int16_t>( text_stream ) ),
+            ( std::istream_iterator<std::int16_t>() ) 
+        );
+
+        std::string read_id = req_id + "::" + std::to_string(req_channel) + "::" +  std::to_string(req_number);
+
+        // std::cout << req_id << " " << req_channel << " " << req_number << " " << req_digitisation << " " << req_offset << std::endl;
+
+        auto new_read = std::make_shared<dorado::Read>();
+        new_read->read_id = read_id;
+
+        if (test) {
+            // Test adopted from FakeDataLoader.cpp
+            constexpr int64_t read_size = 1750;
+            new_read->raw_data = torch::randint(0, 10000, {read_size}, torch::kInt16);
+            
+        } else {
+            auto options = torch::TensorOptions().dtype(torch::kInt16);
+            new_read->raw_data = torch::from_blob(req_data.data(), {req_data.size()}, options);
+
+            new_read->sample_rate = req_sample_rate;
+            new_read->digitisation = req_digitisation;
+            new_read->range = req_range;
+            new_read->offset = req_offset;
+            new_read->scaling = req_range / req_digitisation;
+            new_read->num_trimmed_samples = 0;
+            new_read->attributes.mux = 0;
+            new_read->attributes.read_number = req_number;
+            new_read->attributes.channel_number = req_channel;
+            new_read->attributes.start_time = "";
+            new_read->attributes.fast5_filename = "";
+            new_read->is_duplex = false;
+
+        }
+
+        // std::cout << new_read->read_id << " digitisation=" << new_read->digitisation << " range=" << new_read->range << " offset=" << new_read->offset << " scaling=" << new_read->scaling << " data= " << new_read->raw_data << std::endl;
+
+        m_read_sink.push_message(new_read);
+
+        // m_loaded_read_count++; // not sure if necessary
+
+
     }
 }
 
