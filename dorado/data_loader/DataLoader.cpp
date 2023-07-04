@@ -809,12 +809,10 @@ void DataLoader::load_raw_reads_from_stdin(bool test) {
             ( std::istream_iterator<std::int16_t>() ) 
         );
 
-        std::string read_id = req_id + "::" + std::to_string(req_channel) + "::" +  std::to_string(req_number);
-
         // std::cout << req_id << " " << req_channel << " " << req_number << " " << req_digitisation << " " << req_offset << std::endl;
 
         auto new_read = std::make_shared<dorado::Read>();
-        new_read->read_id = read_id;
+        new_read->read_id = req_id;
 
         if (test) {
             // Test adopted from FakeDataLoader.cpp
