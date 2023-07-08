@@ -20,6 +20,7 @@ public:
                const std::filesystem::path &model_path,
                int chunk_size,
                int batch_size,
+               int granularity,
                const std::string &device,
                float memory_limit_fraction,
                bool exclusive_gpu_access)
@@ -44,7 +45,16 @@ public:
 
         // Batch size will be rounded up to a multiple of batch_size_granularity, regardless of
         // user choice. This makes sure batch size is compatible with GPU kernels.
-        int batch_size_granularity = get_batch_size_granularity(model_config, m_options);
+
+        // ES: this adds unsafe user-value for batch size testing
+
+        int batch_size_granularity;
+        if (granularity == 0){
+            batch_size_granularity = get_batch_size_granularity(model_config, m_options);
+        } else {
+            batch_size_granularity = granularity;
+        }
+        
         m_batch_size = utils::pad_to(batch_size, batch_size_granularity);
         if (batch_size == 0) {
             m_batch_size =
@@ -183,10 +193,11 @@ std::shared_ptr<CudaCaller> create_cuda_caller(const CRFModelConfig &model_confi
                                                const std::filesystem::path &model_path,
                                                int chunk_size,
                                                int batch_size,
+                                               int granularity,
                                                const std::string &device,
                                                float memory_limit_fraction,
                                                bool exclusive_gpu_access) {
-    return std::make_shared<CudaCaller>(model_config, model_path, chunk_size, batch_size, device,
+    return std::make_shared<CudaCaller>(model_config, model_path, chunk_size, batch_size, granularity, device,
                                         memory_limit_fraction, exclusive_gpu_access);
 }
 

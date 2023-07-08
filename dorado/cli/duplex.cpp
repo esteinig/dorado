@@ -329,7 +329,7 @@ int duplex(int argc, char* argv[]) {
                 for (auto device_string : devices) {
                     // Use most of GPU mem but leave some for buffer.
                     auto caller = create_cuda_caller(model_config, model_path, chunk_size,
-                                                     batch_size, device_string, 0.9f, guard_gpus);
+                                                     batch_size, 0, device_string, 0.9f, guard_gpus);
                     for (size_t i = 0; i < num_runners; i++) {
                         runners.push_back(std::make_shared<CudaModelRunner>(caller));
                     }
@@ -345,7 +345,7 @@ int duplex(int argc, char* argv[]) {
                     // memory after simplex caller has been instantiated to the duplex caller.
                     // ALWAYS auto tune the duplex batch size (i.e. batch_size passed in is 0.)
                     auto caller = create_cuda_caller(stereo_model_config, stereo_model_path,
-                                                     chunk_size, 0, device_string, 1.f, guard_gpus);
+                                                     chunk_size, 0, 0, device_string, 1.f, guard_gpus);
                     for (size_t i = 0; i < num_runners; i++) {
                         stereo_runners.push_back(std::make_shared<CudaModelRunner>(caller));
                     }

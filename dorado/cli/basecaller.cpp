@@ -56,6 +56,7 @@ void setup(std::vector<std::string> args,
            size_t chunk_size,
            size_t overlap,
            size_t batch_size,
+           size_t granularity,
            size_t num_runners,
            size_t remora_batch_size,
            size_t num_remora_threads,
@@ -115,7 +116,7 @@ void setup(std::vector<std::string> args,
             throw std::runtime_error("CUDA device requested but no devices found.");
         }
         for (auto device_string : devices) {
-            auto caller = create_cuda_caller(model_config, model_path, chunk_size, batch_size,
+            auto caller = create_cuda_caller(model_config, model_path, chunk_size, batch_size, granularity,
                                              device_string);
             for (size_t i = 0; i < num_runners; i++) {
                 runners.push_back(std::make_shared<CudaModelRunner>(caller));
@@ -274,7 +275,7 @@ void setup(std::vector<std::string> args,
                 thread_allocations.remora_threads * num_devices, model_stride, remora_batch_size);
         basecaller_node_sink = static_cast<MessageSink*>(mod_base_caller_node.get());
     }
-    const int kBatchTimeoutMS = 100;
+    const int kBatchTimeoutMS = 1;
     BasecallerNode basecaller_node(*basecaller_node_sink, std::move(runners), overlap,
                                    kBatchTimeoutMS, model_name, 1000);
     ScalerNode scaler_node(basecaller_node, model_config.signal_norm_params,
@@ -362,12 +363,23 @@ int basecaller(int argc, char* argv[]) {
             .help("if 0 an optimal batchsize will be selected. batchsizes are rounded to the "
                   "closest multiple of 64.");
 
+    
+    parser.add_argument("-g", "--batchsize-granularity")
+            .default_value(0)
+            .scan<'i', int>()
+            .help("unsafe, do not use. if 0 the usual methods for granularity determination are used. batchsizes are rounded to the closest multiple of this value.");
+
     parser.add_argument("-c", "--chunksize")
             .default_value(default_parameters.chunksize)
             .scan<'i', int>();
 
     parser.add_argument("-o", "--overlap")
             .default_value(default_parameters.overlap)
+            .scan<'i', int>();
+
+
+    parser.add_argument("--num-runners")
+            .default_value(default_parameters.num_runners)
             .scan<'i', int>();
 
     parser.add_argument("-r", "--recursive")
@@ -489,8 +501,8 @@ int basecaller(int argc, char* argv[]) {
     try {
         setup(args, model, parser.get<std::string>("data"), mod_bases_models,
               parser.get<std::string>("-x"), parser.get<std::string>("--reference"),
-              parser.get<int>("-c"), parser.get<int>("-o"), parser.get<int>("-b"),
-              default_parameters.num_runners, default_parameters.remora_batchsize,
+              parser.get<int>("-c"), parser.get<int>("-o"), parser.get<int>("-b"), parser.get<int>("-g"),
+              parser.get<int>("--num-runners"), default_parameters.remora_batchsize,
               default_parameters.remora_threads, methylation_threshold, output_mode,
               parser.get<bool>("--emit-moves"), parser.get<int>("--max-reads"),
               parser.get<int>("--min-qscore"), parser.get<std::string>("--read-ids"),

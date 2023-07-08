@@ -191,7 +191,7 @@ DEFINE_TEST(NodeSmokeTestRead, "BasecallerNode") {
         for (auto const& device : devices) {
             auto caller =
                     dorado::create_cuda_caller(model_config, model_path, default_params.chunksize,
-                                               default_params.batchsize, device);
+                                               default_params.batchsize, 0, device);
             for (size_t i = 0; i < default_params.num_runners; i++) {
                 runners.push_back(std::make_shared<dorado::CudaModelRunner>(caller));
             }
