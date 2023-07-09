@@ -73,7 +73,8 @@ void setup(std::vector<std::string> args,
            bool skip_model_compatibility_check,
            const std::string& dump_stats_file,
            const std::string& dump_stats_filter,
-           const std::string& resume_from_file) {
+           const std::string& resume_from_file,
+           size_t batch_timeout) {
     torch::set_num_threads(1);
     std::vector<Runner> runners;
 
@@ -275,9 +276,9 @@ void setup(std::vector<std::string> args,
                 thread_allocations.remora_threads * num_devices, model_stride, remora_batch_size);
         basecaller_node_sink = static_cast<MessageSink*>(mod_base_caller_node.get());
     }
-    const int kBatchTimeoutMS = 1;
+
     BasecallerNode basecaller_node(*basecaller_node_sink, std::move(runners), overlap,
-                                   kBatchTimeoutMS, model_name, 1000);
+                                   batch_timeout, model_name, 1000);
     ScalerNode scaler_node(basecaller_node, model_config.signal_norm_params,
                            thread_allocations.scaler_node_threads);
 
@@ -363,8 +364,12 @@ int basecaller(int argc, char* argv[]) {
             .help("if 0 an optimal batchsize will be selected. batchsizes are rounded to the "
                   "closest multiple of 64.");
 
+    parser.add_argument("--batch-timeout")
+            .default_value(100)
+            .scan<'i', int>()
+            .help("unsafe, do not use. batch size timeout value.");
     
-    parser.add_argument("-g", "--batchsize-granularity")
+    parser.add_argument("-g", "--granularity")
             .default_value(0)
             .scan<'i', int>()
             .help("unsafe, do not use. if 0 the usual methods for granularity determination are used. batchsizes are rounded to the closest multiple of this value.");
@@ -511,7 +516,7 @@ int basecaller(int argc, char* argv[]) {
               internal_parser.get<bool>("--skip-model-compatibility-check"),
               internal_parser.get<std::string>("--dump_stats_file"),
               internal_parser.get<std::string>("--dump_stats_filter"),
-              parser.get<std::string>("--resume-from"));
+              parser.get<std::string>("--resume-from"), parser.get<int>("--batch-timeout"));
     } catch (const std::exception& e) {
         spdlog::error("{}", e.what());
         return 1;
