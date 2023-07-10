@@ -367,7 +367,7 @@ int basecaller(int argc, char* argv[]) {
     parser.add_argument("--batch-timeout")
             .default_value(100)
             .scan<'i', int>()
-            .help("unsafe, do not use. batch size timeout value.");
+            .help("unsafe, do not use. batch size timeout value in MICROSECONDS.");
     
     parser.add_argument("-g", "--granularity")
             .default_value(0)

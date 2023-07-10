@@ -177,7 +177,7 @@ void BasecallerNode::basecall_worker_thread(int worker_id) {
         std::unique_lock<std::mutex> chunks_lock(m_chunks_in_mutex);
         if (!m_chunks_added_cv.wait_until(
                     chunks_lock,
-                    last_chunk_reserve_time + std::chrono::milliseconds(m_batch_timeout_ms),
+                    last_chunk_reserve_time + std::chrono::microseconds(m_batch_timeout_ms),
                     [this] { return !m_chunks_in.empty() || m_terminate_basecaller.load(); })) {
             // timeout without new chunks or termination call
             chunks_lock.unlock();
