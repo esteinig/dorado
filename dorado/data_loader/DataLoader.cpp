@@ -775,24 +775,19 @@ void DataLoader::load_fast5_reads_from_file(const std::string& path) {
     }
 }
 
+std::shared_ptr<dorado::Read> process_input_line(std::string line) {
 
-void DataLoader::load_raw_reads_from_stdin(bool test) {
-    
-    std::string line;
-    std::string req_id;
 
-    std::int32_t req_channel;
-    std::int32_t req_number;
+        std::string req_id;
 
-    float req_digitisation;
-    float req_offset;
-    float req_range;
+        std::int32_t req_channel;
+        std::int32_t req_number;
 
-    std::uint64_t req_sample_rate;
+        float req_digitisation;
+        float req_offset;
+        float req_range;
 
-    std::vector<int16_t> req_data;  // uncalibrated signal data from byte data out of minknow
-
-    while(std::getline( std::cin, line ) && !line.empty()){  
+        std::uint64_t req_sample_rate;
 
         std::istringstream text_stream(line);
         
@@ -809,43 +804,60 @@ void DataLoader::load_raw_reads_from_stdin(bool test) {
             ( std::istream_iterator<std::int16_t>() ) 
         );
 
-        // std::cout << req_id << " " << req_channel << " " << req_number << " " << req_digitisation << " " << req_offset << std::endl;
-
         auto new_read = std::make_shared<dorado::Read>();
         new_read->read_id = req_id;
 
-        if (test) {
-            // Test adopted from FakeDataLoader.cpp
-            constexpr int64_t read_size = 1750;
-            new_read->raw_data = torch::randint(0, 10000, {read_size}, torch::kInt16);
-            
-        } else {
-            auto options = torch::TensorOptions().dtype(torch::kInt16);
-            new_read->raw_data = torch::from_blob(req_data.data(), {req_data.size()}, options);
 
-            new_read->sample_rate = req_sample_rate;
-            new_read->digitisation = req_digitisation;
-            new_read->range = req_range;
-            new_read->offset = req_offset;
-            new_read->scaling = req_range / req_digitisation;
-            new_read->num_trimmed_samples = 0;
-            new_read->attributes.mux = 0;
-            new_read->attributes.read_number = req_number;
-            new_read->attributes.channel_number = req_channel;
-            new_read->attributes.start_time = "";
-            new_read->attributes.fast5_filename = "";
-            new_read->is_duplex = false;
+        // Issue was that blob doesn't take ownership of the original data! I
+        // think this is the main reason for the crashes with weird memory errors
 
+        // https://pytorch.org/cppdocs/api/function_namespacetorch_1aff6f8e6185457b2b67a1a9f292effe6b.html#_CPPv4N5torch9from_blobEPvN2at11IntArrayRefERKN2at13TensorOptionsE
+
+        // It would need a .clone() on the blob or use accessor loop
+        
+        // https://stackoverflow.com/questions/59676983/in-torch-c-api-how-to-write-to-the-internal-data-of-a-tensor-fastly
+
+        auto options = torch::TensorOptions().dtype(torch::kInt16);
+        auto data_size = req_data.size();
+        auto samples = torch::empty(data_size, options);
+
+        auto accessor = samples.accessor<short int,1>();
+        for(int i=0; i < data_size; i++) {
+            accessor[i] = req_data[i];
         }
+       
+        new_read->raw_data = samples; // torch::from_blob(req_data.data(), {data_size}, options).clone();  // .data_ptr<int16_t>()
 
-        // std::cout << new_read->read_id << " digitisation=" << new_read->digitisation << " range=" << new_read->range << " offset=" << new_read->offset << " scaling=" << new_read->scaling << " data= " << new_read->raw_data << std::endl;
+        new_read->sample_rate = req_sample_rate;
+        new_read->digitisation = req_digitisation;
+        new_read->range = req_range;
+        new_read->offset = req_offset;
+        new_read->scaling = req_range / req_digitisation;
+        new_read->num_trimmed_samples = 0;
+        new_read->attributes.mux = 0;
+        new_read->attributes.read_number = req_number;
+        new_read->attributes.channel_number = req_channel;
+        new_read->attributes.start_time = "";
+        new_read->attributes.fast5_filename = "";
+        new_read->is_duplex = false;
 
+
+        return new_read;
+}
+
+void DataLoader::load_raw_reads_from_stdin() {
+    
+       
+    std::string line;
+    std::vector<std::shared_ptr<dorado::Read>> batch;
+    while(std::getline( std::cin, line ) && !line.empty()){  
+
+        auto new_read = process_input_line(line);
         m_read_sink.push_message(new_read);
-
-        // m_loaded_read_count++; // not sure if necessary
-
+        m_loaded_read_count++;
 
     }
+
 }
 
 DataLoader::DataLoader(MessageSink& read_sink,

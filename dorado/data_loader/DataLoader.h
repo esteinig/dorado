@@ -62,7 +62,7 @@ public:
     stats::NamedStats sample_stats() const;
 
 private:
-    void load_raw_reads_from_stdin(bool test = false);
+    void load_raw_reads_from_stdin();
     void load_fast5_reads_from_file(const std::string& path);
     void load_pod5_reads_from_file(const std::string& path);
     void load_pod5_reads_from_file_by_read_ids(const std::string& path,
